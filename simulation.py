@@ -1,5 +1,5 @@
 from maker import SimpleMarketMaker as MarketMaker
-from build.Mmgame import MarketData
+from mm_game import MarketData
 from typing import Tuple
 from logger import Logger
 from datetime import datetime
