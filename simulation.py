@@ -6,7 +6,7 @@ from datetime import datetime
 from math import floor
 
 
-INTERVAL = 60
+INTERVAL = 60*390
 INIT_BUY = 100.5
 INIT_SELL = 99.5
 START_MONEY = 100*1000
