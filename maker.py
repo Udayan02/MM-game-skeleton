@@ -79,5 +79,25 @@ class SimpleMarketMaker(MarketMaker):
         def update(self, prev_bid_price, prev_ask_price, timestamp) -> Tuple[float, int, float, int, OrderType]:
             """
             Example on how to implement the update method for the market maker.
+
+            This example will return the previous bid price and ask price, and the volume to buy and sell
+            as 100, and a new limit order with the timestamp and timestamp + 100.
+
+            To return a market order, you can use OrderType.new_market_order(timestamp)
+            ```
+            return prev_bid_price, 100, prev_ask_price, 100, OrderType.new_market_order(timestamp)
+            ```
+            For market order, the limit price will be defaulted to the market bid and ask price.
+
+            Note that the volume to buy and sell can be any integer value, including 0. If the volume is negative,
+            it will be set to 0. If the volume to sell is more than the holding, it will be set to the holding.
+
+            :param prev_bid_price: the previous bid price
+            :param prev_ask_price: the previous ask price
+            :param timestamp: the timestamp of the current (not previous) interval
+
+            :return: a tuple containing the new bid price limit, the volume to buy, the new ask price limit,
+            the volume to sell, and the order type as OrderType object
+
             """
             return prev_bid_price, 100, prev_ask_price, 100, OrderType.new_limit_order(timestamp, timestamp + 100)
