@@ -1,15 +1,15 @@
-from maker import SimpleMarketMaker as MarketMaker
+from maker import SimpleMarketMaker as MarketMaker, OrderType
 from mm_game import MarketData
 from typing import Tuple
 from logger import Logger
 from datetime import datetime
 from math import floor
+import numpy as np
 
-
-INTERVAL = 60*390
+INTERVAL = 60*10
 INIT_BUY = 100.5
 INIT_SELL = 99.5
-START_MONEY = 100*1000
+START_MONEY = 1000
 
 class Simulation():
     def __init__(self, maker: MarketMaker):
@@ -27,9 +27,11 @@ class Simulation():
         self.profit = []
         self.holding = 0
         self.money = START_MONEY
+        # format: [price, volume, buy/sell, from_time, to_time]
+        self.limit_order_queue = []
 
-    def checkAndUpdate(self, prevBuy, prevSell, logging = False)  -> Tuple[float, int, float, int]:
-        buy, vb, sell, vs = self.market_maker.update(prevBuy, prevSell)
+    def checkAndUpdate(self, prevBuy, prevSell, timestamp, logging = False)  -> Tuple[float, int, float, int, OrderType]:
+        buy, vb, sell, vs, order_type = self.market_maker.update(prevBuy, prevSell, timestamp)
         if(buy < 0):
             if(logging):
                 self.logger.warning("Buy price is negative, setting volume to 0")
@@ -50,7 +52,7 @@ class Simulation():
             if(logging):
                 self.logger.warning("Selling more than holding, setting volume to holding")
             vs = self.holding
-        return buy, vb, sell, vs
+        return buy, vb, sell, vs, order_type
     
     def reset(self):
         self.start_time = datetime.now()
@@ -65,6 +67,79 @@ class Simulation():
         self.sell = []
         self.profit = []
         self.holding = 0
+        self.limit_order_queue = []
+
+    def executeLimitOrders(self, market_sell, market_buy, timestamp, logging = False):
+        profit = 0.0
+        for order in self.limit_order_queue:
+            price = order[0]
+            volume = order[1]
+            buy_sell = order[2]
+            from_time = order[3]
+            to_time = order[4]
+            
+            # remove all orders that are expired
+            if timestamp > to_time:
+                self.limit_order_queue.remove(order)
+                continue
+
+            if timestamp < from_time:
+                continue
+
+            if buy_sell == "sell" and price >= market_buy and self.holding >= 0:
+                if(logging):
+                    self.logger.info(f"Executing Limit Order: Selling at {market_buy} with limit price at {price} for {volume}")
+                if(volume > self.holding):
+                    volume = self.holding
+                    if(logging):
+                        self.logger.warning(f"Selling more than holding, setting volume to {volume}")
+                self.money += market_buy * volume
+                self.holding -= volume
+                self.limit_order_queue.remove(order)
+                profit += price * volume
+
+            if buy_sell == "buy" and price <= market_sell and self.money >= 0:
+                if(logging):
+                    self.logger.info(f"Executing Limit Order: Buying at {market_buy} with limit price at {price} for {volume}")
+                max_buyable_volume = floor(self.money / market_sell)
+                if volume > max_buyable_volume:
+                    volume = max_buyable_volume
+                    if(logging):
+                        self.logger.warning(f"Buying more than available money, setting volume to {volume}")
+                self.money -= market_sell * volume
+                self.holding += volume
+                self.limit_order_queue.remove(order)
+                profit += -price * volume
+        return profit
+
+
+    def addLimitOrder(self, price, volume, buy_sell, from_time, to_time, logging = False):
+        if(logging):
+            self.logger.info(f"Adding Limit Order: {buy_sell} at {price} for {volume} from {from_time} to {to_time}")
+        self.limit_order_queue.append([price, volume, buy_sell, from_time, to_time])
+
+    def executeOrders(self, market_buy, market_sell, volume_buy, volume_sell, logging = False) -> float:
+        max_buyable_volume = floor(self.money / market_sell)
+        if volume_buy > max_buyable_volume:
+            volume_buy = max_buyable_volume
+            if(logging):
+                self.logger.warning(f"Buying more than available money, setting volume to {volume_buy}")
+        if(logging and volume_buy > 0):
+            self.logger.info(f"Buying at {market_buy} for {volume_buy}")
+        self.money -= market_sell * volume_buy
+        self.holding += volume_buy
+
+        if(volume_sell > self.holding):
+            volume_sell = self.holding
+            if(logging):
+                self.logger.warning(f"Selling more than holding, setting volume to {volume_sell}")
+
+        if(logging and volume_sell > 0):
+            self.logger.info(f"Selling at {market_sell} with market price at for {volume_sell}")
+        self.money += market_sell * volume_sell
+        self.holding -= volume_sell
+
+        return 0.0 - (market_sell * volume_buy) + (market_buy * volume_sell)
 
     def run(self, logging = False):
 
@@ -79,13 +154,18 @@ class Simulation():
             self.logger.spacing()
 
         while(i < INTERVAL):
-            mb, vb, mS, vs = self.checkAndUpdate(mmBuy, mmSell)
+            mb, vb, mS, vs, OrderType = self.checkAndUpdate(mmBuy, mmSell, i, logging)
             if(logging):
                 self.logger.log(f"Interval: {i}")
                 self.logger.log(f"Market: Buy: {mmBuy} Sell: {mmSell}")
-                self.logger.log(f"Buy: {mb} Volume: {vb} Sell: {mS} Volume: {vs}")
+                self.logger.log(f"Buy limit: {mb} Volume: {vb} Sell limit: {mS} Volume: {vs} Order Type: {OrderType}")
 
-            [mmBuy, mmSell] = self.mm.getNextPrices(mb, vb, mS, vs)
+            if(OrderType.type == "limit"):
+                [mmBuy, mmSell] = self.mm.getNextPrices(mb, vb, mS, vs)
+            elif(OrderType.type == "market"):
+                mmBuy += np.random.uniform(-mmBuy / 20, mmBuy / 30)
+                mmSell += np.random.uniform(-mmSell / 20, mmSell / 30)
+                [mmBuy, mmSell] = self.mm.getNextPrices(mmBuy, vb, mmSell, vs)
 
             self.mmBuy.append(mmBuy)
             self.mmSell.append(mmSell)
@@ -96,25 +176,16 @@ class Simulation():
             self.sellVolume.append(vs)
 
             profit = 0.0
-            # buy high selll low
-            if mmSell <= mb:
-                max_buyable_volume = floor(self.money / mmSell)
-                if vb > max_buyable_volume:
-                    vb = max_buyable_volume
-                    if(logging):
-                        self.logger.warning(f"Buying more than available money, setting volume to {vb}") 
-                if(logging and vb > 0):
-                    self.logger.info(f"Buying at {mb} for {vb}")
-                profit += -mmSell * vb
-                self.money -= mmSell *vb
-                self.holding += vb
-            # sell high buy low
-            if mmBuy <= mS:
-                if(logging and vs > 0):
-                    self.logger.info(f"Selling at {mS} with market price at for {vs}")
-                profit += (mS - mmBuy) * vs
-                self.money += mS * vs
-                self.holding -= vs
+            if(OrderType.type == "limit"):
+                if(vb > 0):
+                    self.addLimitOrder(mb, vb, "buy", OrderType.from_time, OrderType.to_time)
+                if(vs > 0):
+                    self.addLimitOrder(mS, vs, "sell", OrderType.from_time, OrderType.to_time)
+            elif(OrderType.type == "market"):
+                # execute market orders
+                profit += self.executeOrders(mmBuy, mmSell, vb, vs, logging)
+
+            profit += self.executeLimitOrders(mmSell, mmBuy, i, logging)
 
             self.profit.append(profit)
             if(logging):
