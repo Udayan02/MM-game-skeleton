@@ -74,7 +74,8 @@ class SimpleMarketMaker(MarketMaker):
         """
         def __init__(self):
              pass
-
+        
+        # TODO: Replace this example with your strategy
         def update(self, prev_bid_price, prev_ask_price, timestamp) -> Tuple[float, int, float, int, OrderType]:
             """
             Example on how to implement the update method for the market maker.
